@@ -50,17 +50,17 @@ module car_fsm
 	[step] state=CL & CO -> (state'=CS);
 	[step] state=CL & !CO -> (state'=NO);
 
-	// 1. Crash only if car is moving too fast at zero distance
+	// Crash only if car is moving too fast at distance = 0
 	[step] state=BR & distance=0 & CurrSpeed > 5 -> (state'=CS);
 
-	// 1b. Soft stop at 0 distance if very slow (safe buffer)
+	// Stop at 0 distance if CurrSpeed <= 5 (safe buffer)
 	[step] state=BR & distance=0 & CurrSpeed >= 0 & CurrSpeed <= 5 -> 
     		(CurrSpeed'=0) & (state'=BR);
 
-	// 2. Try to change lanes
+	// Try to change lanes if side lane is open
 	[step] state=BR & OD & LC & CurrSpeed > 0 -> (state'=CL);
 
-	// 3. Emergency braking (distance <= 3)
+	// Emergency braking based on CurrSpeed (distance <= 3)
 	[step] state=BR & OD & CurrSpeed >= 50 & distance <= 3 ->
     		(CurrSpeed'=max(CurrSpeed - 20, 0)) & (distance'=max(distance - 1, 0)) & (state'=BR);
 
@@ -73,14 +73,14 @@ module car_fsm
 	[step] state=BR & OD & CurrSpeed < 10 & distance <= 3 ->
     		(CurrSpeed'=max(CurrSpeed - 5, 0)) & (distance'=max(distance - 1, 0)) & (state'=BR);
 
-	// 5. Soft brake for non-obstacle or stalled distance
+	// Slow down vehicle when no obstacle or distance = 0
 	[step] state=BR & CurrSpeed > 0 & (!OD | distance=0) ->
     		(CurrSpeed'=max(CurrSpeed - 5, 0)) & (state'=BR);
 
-	// 6. Recovery
+	// Return to normal operations
 	[step] state=BR & (CurrSpeed = 0 | !OD) -> (distance'=3) & (state'=NO);
 
-	// 7. Transitions due to manual override, sensor error, or external crash
+	// Transitions to manual override, sensor malfunction, or crash state
 	[step] state=BR & MI -> (state'=MO);
 	[step] state=BR & SE -> (state'=SF);
 	[step] state=BR & CO -> (state'=CS);
