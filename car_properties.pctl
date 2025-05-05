@@ -1,0 +1,38 @@
+//Brake if an obstacle is detected and lane change is not allowed
+P>=1 [ (OD & !LC) => (F state=BR) ]
+
+// Should not stay in normal driving (NO) if speeding too much (> Limit + 8)
+// If in NO while speeding, must eventually go to BR (braking)
+P>=1 [ (state=NO&CurrSpeed>Limit+8)=>(F state=BR) ]
+
+// c. If collision happens, system stays in crash state forever
+P>=1 [ (state=CS) => (G (state=CS)) ]
+
+//If sensor error happens, eventually go to safe failure (SF)
+P>=1 [ SE => (F (state=SF)) ]
+
+//If manual takeover request (MI) switch to manual override (MO)
+P>=1 [ (state=NO & MI)|(state=SF & MI) => (G (state=MO)) ]
+
+// Ensures the system can reach Normal Operation from the initial state
+P>0 [ F state=NO ]
+
+//Percentage changes
+// High chance (≥85%) to stay in NO even if SE is possible
+P>=0.85 [ state=NO U (SE|state!=NO) ]
+
+//Minimum probability system will enter SC state given that the system is in NO and below the speed limit
+Pmin=? [ (state=NO & CurrSpeed < Limit) => (F state=SC) ]
+
+//max # of crashes in 20 steps
+R{"crashes"}max=? [ C <= 20]
+
+//Min steps to reach reach crash state CS
+R{"steps_to_stop"}min=? [ (F state=CS) ]
+
+
+//Expected min steps until breaking occurs
+R{"brake_steps"}min=? [ F (state=BR) ]
+
+//Minimum # of steps until vehicle turns off (no crashes safe behavior): 
+R{"steps"}min=? [ F state=VO & !On]

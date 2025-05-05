@@ -1,0 +1,130 @@
+mdp
+
+// CONSTANTS
+const int VO = 0; // Vehicle Off
+const int NO = 1; // Normal Operation
+const int MO = 2; // Manual Override
+const int SF = 3; // Sensor Malfunction
+const int BR = 4; // Braking Required
+const int CL = 5; // Change Lane
+const int SC = 6; // Speed Control
+const int CS = 7; // Crash State
+
+// VARIABLES
+module car_fsm
+	state : [0..7] init VO;
+
+	// Inputs
+	CurrSpeed : [0..120] init 0;
+	Limit : [0..80] init 50;
+
+	// Distance indicator (3=safe, 2=warning, 1=danger, 0=imminent)
+	distance : [0..3] init 3;
+
+	// Transitions
+
+	[step] state=VO & On & !MI -> (state'=NO);
+	[step] state=VO & On & MI -> (state'=MO);
+	[step] state=VO & !On -> (state'=VO);
+
+	[step] state=NO & !On -> (state'=VO);
+	[step] state=NO & !OD & !SE & !MI -> (state'=NO);
+	[step] state=NO & MI -> (state'=MO);
+	[step] state=NO & SE -> (state'=SF);
+	[step] state=NO & OD & !LC -> (distance'=3) & (state'=BR);
+	[step] state=NO & (CurrSpeed > Limit + 8) -> (state'=BR);
+	[step] state=NO & OD & LC -> (state'=CL);
+	[step] state=NO & !OD & CurrSpeed < Limit -> (state'=SC);
+	[step] state=NO & CO -> (state'=CS);
+
+	[step] state=MO & MI -> (state'=MO);
+	[step] state=MO & !MI -> (state'=NO);
+	[step] state=MO & !On -> (state'=VO);
+	[step] state=MO & CO -> (state'=CS);
+
+	[step] state=SF & SE & MI -> (state'=MO);
+	[step] state=SF & SE -> (state'=SF);
+	[step] state=SF & !SE -> (state'=NO);
+	[step] state=SF & CO -> (state'=CS);
+
+	[step] state=CL & CO -> (state'=CS);
+	[step] state=CL & !CO -> (state'=NO);
+
+	// 1. Crash only if car is moving too fast at zero distance
+	[step] state=BR & distance=0 & CurrSpeed > 5 -> (state'=CS);
+
+	// 1b. Soft stop at 0 distance if very slow (safe buffer)
+	[step] state=BR & distance=0 & CurrSpeed >= 0 & CurrSpeed <= 5 -> 
+    		(CurrSpeed'=0) & (state'=BR);
+
+	// 2. Try to change lanes
+	[step] state=BR & OD & LC & CurrSpeed > 0 -> (state'=CL);
+
+	// 3. Emergency braking (distance <= 3)
+	[step] state=BR & OD & CurrSpeed >= 50 & distance <= 3 ->
+    		(CurrSpeed'=max(CurrSpeed - 20, 0)) & (distance'=max(distance - 1, 0)) & (state'=BR);
+
+	[step] state=BR & OD & CurrSpeed >= 30 & CurrSpeed < 50 & distance <= 3 ->
+    	(CurrSpeed'=max(CurrSpeed - 15, 0)) & (distance'=max(distance - 1, 0)) & (state'=BR);
+
+	[step] state=BR & OD & CurrSpeed >= 10 & CurrSpeed < 30 & distance <= 3 ->
+    		(CurrSpeed'=max(CurrSpeed - 10, 0)) & (distance'=max(distance - 1, 0)) & (state'=BR);
+
+	[step] state=BR & OD & CurrSpeed < 10 & distance <= 3 ->
+    		(CurrSpeed'=max(CurrSpeed - 5, 0)) & (distance'=max(distance - 1, 0)) & (state'=BR);
+
+	// 5. Soft brake for non-obstacle or stalled distance
+	[step] state=BR & CurrSpeed > 0 & (!OD | distance=0) ->
+    		(CurrSpeed'=max(CurrSpeed - 5, 0)) & (state'=BR);
+
+	// 6. Recovery
+	[step] state=BR & (CurrSpeed = 0 | !OD) -> (distance'=3) & (state'=NO);
+
+	// 7. Transitions due to manual override, sensor error, or external crash
+	[step] state=BR & MI -> (state'=MO);
+	[step] state=BR & SE -> (state'=SF);
+	[step] state=BR & CO -> (state'=CS);
+
+
+	[step] state=SC & !OD & CurrSpeed < Limit -> (CurrSpeed'=min(CurrSpeed+4, Limit)) & (state'=SC);
+	[step] state=SC & (CurrSpeed >= Limit) -> (state'=NO);
+	[step] state=SC & OD -> (state'=BR);
+	[step] state=SC & CO -> (state'=CS);
+	[step] state=SC & SE -> (state'=SF);
+	[step] state=SC & MI -> (state'=MO);
+
+endmodule
+
+// Probabilistic input changes
+module input_driver
+	MI : bool init false;
+	OD : bool init false;
+	SE : bool init false;
+	LC : bool init false;
+	CO : bool init false;
+	On : bool init true;
+	
+	[step] true -> 0.95 : (On'=true) + 0.05 : (On'=false);
+	[step] true -> 0.1 : (MI'=true) + 0.9 : (MI'=false);
+	[step] true -> 0.20 : (OD'=true) + 0.80 : (OD'=false);
+	[step] true -> 0.05 : (SE'=true) + 0.95 : (SE'=false);
+	[step] true -> 0.3 : (LC'=true) + 0.7 : (LC'=false);
+	[step] true -> 0.0 : (CO'=true) + 1.0 : (CO'=false);
+endmodule
+
+rewards "crashes"
+    state= CS : 1;
+endrewards
+
+rewards "steps_to_stop"
+  state != CS & state != NO : 1;
+endrewards
+
+rewards "brake_steps"
+  state != BR : 1;
+endrewards
+
+rewards "steps"
+  true : 1;
+endrewards
+
